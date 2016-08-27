@@ -79,6 +79,8 @@ int main(int argc, const char *argv[]) {
   unsigned int addr[3];
   unsigned int first_addr, last_addr, first_port, last_port, count, total, i, j;
 
+  table = NULL;
+
   if(argc != 3) {
     fprintf(stdout, "Uso: %s <address range> <port range>\n", argv[0]);
     return 0;
@@ -108,6 +110,12 @@ int main(int argc, const char *argv[]) {
     }
 
     fprintf(stdout, "\n");
+  }
+
+  while(table != NULL) {
+    entry = table;
+    table = table->next;
+    free(entry);
   }
 
   return 0;

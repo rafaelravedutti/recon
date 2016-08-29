@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -14,6 +15,9 @@
 
 /* Request string */
 #define MAGIC_STRING      "HEAD / HTTP/1.1\n\n"
+
+/* Connect timeout (seconds) */
+#define CONNECT_TIMEOUT   2
 
 /* Scan table */
 struct scan_table {
@@ -69,13 +73,16 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
   char buffer[BUFFER_LENGTH];
   char pseudo_buffer[BUFFER_LENGTH];
   char banner[64];
-  int sock, got_banner = 0, one = 1;
+  fd_set fdset;
+  int sock, sock_error, flags, got_banner = 0, one = 1;
   unsigned int i;
   struct sockaddr_in addr;
   struct scan_table *entry;
   struct iphdr *ip;
   struct tcphdr *tcp;
   struct pseudo_header *phdr;
+  struct timeval tv;
+  socklen_t sock_length = sizeof sock_error;
 
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
@@ -158,7 +165,39 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
       return;
     }
 
-    if(connect(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr_in)) < 0) {
+    if((flags = fcntl(sock, F_GETFL)) < 0) {
+      perror("fcntl");
+      close(sock);
+      return;
+    }
+
+    if(fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+      perror("fcntl");
+      close(sock);
+      return;
+    }
+
+    FD_ZERO(&fdset);
+    FD_SET(sock, &fdset);
+    tv.tv_sec = CONNECT_TIMEOUT;
+    tv.tv_usec = 0;
+
+    connect(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr_in));
+
+    if(select(sock + 1, NULL, &fdset, NULL, &tv) > 0) {
+      getsockopt(sock, SOL_SOCKET, SO_ERROR, &sock_error, &sock_length);
+
+      if(sock_error != 0) {
+        close(sock);
+        return;
+      }
+    } else {
+      close(sock);
+      return;
+    }
+
+    if(fcntl(sock, F_SETFL, flags & ~O_NONBLOCK) < 0) {
+      perror("fcntl");
       close(sock);
       return;
     }
@@ -189,9 +228,7 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
       strncpy(entry->banner, banner, sizeof entry->banner);
     }
 
-    if(*table != NULL) {
-      (*table)->next = entry;
-    } else {
+    if(*table == NULL) {
       *table = entry;
     }
   }

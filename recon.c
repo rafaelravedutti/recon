@@ -13,12 +13,12 @@
 #define BUFFER_LENGTH     256
 
 /* Request string */
-#define MAGIC_STRING      "Give me your banner now!\n"
+#define MAGIC_STRING      "HEAD / HTTP/1.1\n\n"
 
 /* Scan table */
 struct scan_table {
   char address[32];
-  char banner[32];
+  char banner[64];
   unsigned int port;
   struct scan_table *next;
 };
@@ -68,8 +68,9 @@ void range_scan(const char *range, unsigned int *first, unsigned int *last) {
 void scan_port(const char *address, unsigned int port, unsigned char use_raw_socket, struct scan_table **table) {
   char buffer[BUFFER_LENGTH];
   char pseudo_buffer[BUFFER_LENGTH];
-  char banner[32];
+  char banner[64];
   int sock, got_banner = 0, one = 1;
+  unsigned int i;
   struct sockaddr_in addr;
   struct scan_table *entry;
   struct iphdr *ip;
@@ -162,9 +163,17 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
       return;
     }
 
-    if(write(sock, MAGIC_STRING, strlen(MAGIC_STRING)) >= 0) {
-      read(sock, banner, sizeof banner);
-      got_banner = 1;
+    if(write(sock, MAGIC_STRING, strlen(MAGIC_STRING)) > 0) {
+      if(read(sock, banner, sizeof banner) > 0) {
+        for(i = 0; i < sizeof banner; ++i) {
+          if(banner[i] == '\n') {
+            banner[i] = '\0';
+            break;
+          }
+        }
+
+        got_banner = 1;
+      }
     }
   }
 

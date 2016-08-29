@@ -68,7 +68,8 @@ void range_scan(const char *range, unsigned int *first, unsigned int *last) {
 void scan_port(const char *address, unsigned int port, unsigned char use_raw_socket, struct scan_table **table) {
   char buffer[BUFFER_LENGTH];
   char pseudo_buffer[BUFFER_LENGTH];
-  int sock, one = 1;
+  char banner[32];
+  int sock, got_banner = 0, one = 1;
   struct sockaddr_in addr;
   struct scan_table *entry;
   struct iphdr *ip;
@@ -160,6 +161,11 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
       close(sock);
       return;
     }
+
+    if(write(sock, MAGIC_STRING, strlen(MAGIC_STRING)) >= 0) {
+      read(sock, banner, sizeof banner);
+      got_banner = 1;
+    }
   }
 
   entry = (struct scan_table *) malloc(sizeof(struct scan_table));
@@ -169,6 +175,10 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
     entry->next = *table;
     entry->banner[0] = '\0';
     strncpy(entry->address, address, sizeof entry->address);
+
+    if(got_banner != 0) {
+      strncpy(entry->banner, banner, sizeof entry->banner);
+    }
 
     if(*table != NULL) {
       (*table)->next = entry;

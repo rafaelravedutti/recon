@@ -69,7 +69,7 @@ void range_scan(const char *range, unsigned int *first, unsigned int *last) {
   }
 }
 
-void scan_port(const char *address, unsigned int port, unsigned char use_raw_socket, struct scan_table **table) {
+void scan_port(const char *address, unsigned int port, unsigned char use_raw_socket, unsigned char verbose, struct scan_table **table) {
   char buffer[BUFFER_LENGTH];
   char pseudo_buffer[BUFFER_LENGTH];
   char banner[64];
@@ -142,10 +142,18 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
     memcpy(pseudo_buffer + sizeof(struct pseudo_header), tcp, sizeof(struct tcphdr));
     tcp->check = csum((unsigned short *) pseudo_buffer, sizeof(struct pseudo_header) + sizeof(struct tcphdr));
 
+    if(verbose != 0) {
+      fprintf(stdout, "Scanning %s:%u (sending SYN packet)...\n", address, port);
+    }
+
     if(sendto(sock, buffer, ip->tot_len, 0, (struct sockaddr *) &addr, sizeof(struct sockaddr_in)) < 0) {
       perror("sendto");
       close(sock);
       return;
+    }
+
+    if(verbose != 0) {
+      fprintf(stdout, "Scanning %s:%u (waiting for answer)...\n", address, port);
     }
 
     if(recv(sock, buffer, sizeof buffer, 0) < 0) {
@@ -184,6 +192,10 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
 
     connect(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr_in));
 
+    if(verbose != 0) {
+      fprintf(stdout, "Scanning %s:%u (connecting)...\n", address, port);
+    }
+
     if(select(sock + 1, NULL, &fdset, NULL, &tv) > 0) {
       getsockopt(sock, SOL_SOCKET, SO_ERROR, &sock_error, &sock_length);
 
@@ -200,6 +212,10 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
       perror("fcntl");
       close(sock);
       return;
+    }
+
+    if(verbose != 0) {
+      fprintf(stdout, "Scanning %s:%u (retrieving banner)...\n", address, port);
     }
 
     if(write(sock, MAGIC_STRING, strlen(MAGIC_STRING)) > 0) {
@@ -236,42 +252,58 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
   close(sock);
 }
 
-int main(int argc, const char *argv[]) {
+int main(int argc, char *argv[]) {
   struct scan_table *table, *entry;
   char range[32], address[32];
+  int opt;
   unsigned int addr[3];
   unsigned int first_addr, last_addr, first_port, last_port, count, total, i, j;
+  unsigned char use_raw_socket = 0, verbose = 0;
   time_t now;
 
   table = NULL;
   count = 0;
   time(&now);
 
-  if(argc != 2 && argc != 3) {
-    fprintf(stdout, "Uso: %s <address range> [port range]\n", argv[0]);
+  if(argc < 2) {
+    fprintf(stdout, "Uso: %s [-sv] <address range> [port range]\n", argv[0]);
     return 0;
   }
 
+  while((opt = getopt(argc, argv, "sv")) != -1) {
+    switch(opt) {
+      case 's':
+        use_raw_socket = 1;
+        break;
+      case 'v':
+        verbose = 1;
+        break;
+      default:
+        fprintf(stdout, "Uso: %s [-sv] <address range> [port range]\n", argv[0]);
+        exit(0);
+    }
+  }
+
   fprintf(stdout, "Varredura iniciada em %s", ctime(&now));
-  fprintf(stdout, "IP: %s\n", argv[1]);
-  fprintf(stdout, "Portas: %s\n", (argc != 3) ? ("*") : argv[2]);
+  fprintf(stdout, "IP: %s\n", argv[optind]);
+  fprintf(stdout, "Portas: %s\n", (argc < optind + 2) ? ("*") : argv[optind + 1]);
   fprintf(stdout, "---\n");
 
-  if(argc != 3) {
+  if(argc < optind + 2) {
     first_port = 0;
     last_port = 65535;
   } else {
-    range_scan(argv[2], &first_port, &last_port);
+    range_scan(argv[optind + 1], &first_port, &last_port);
   }
 
-  sscanf(argv[1], "%u.%u.%u.%s", &addr[0], &addr[1], &addr[2], range);
+  sscanf(argv[optind], "%u.%u.%u.%s", &addr[0], &addr[1], &addr[2], range);
   range_scan(range, &first_addr, &last_addr);
 
   total = (last_addr - first_addr + 1) * (last_port - first_port + 1);
   for(i = first_addr; i <= last_addr; ++i) {
     for(j = first_port; j <= last_port; ++j) {
       snprintf(address, sizeof address, "%u.%u.%u.%u", addr[0], addr[1], addr[2], i);
-      scan_port(address, j, 0, &table);
+      scan_port(address, j, use_raw_socket, verbose, &table);
       ++count;
     }
   }
@@ -290,6 +322,10 @@ int main(int argc, const char *argv[]) {
     entry = table;
     table = table->next;
     free(entry);
+  }
+
+  if(verbose != 0) {
+    fprintf(stdout, "%u ports scanned in total!\n", total);
   }
 
   return 0;

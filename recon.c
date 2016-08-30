@@ -188,7 +188,6 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
       close(sock);
       return;
     }
-
   } else {
     sock = socket(AF_INET, SOCK_STREAM, 0);
 

@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <sys/ioctl.h>
+#include <time.h>
 #include <arpa/inet.h>
+#include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
@@ -35,6 +37,24 @@ struct pseudo_header {
   unsigned char protocol;
   unsigned short tcp_length;
 };
+
+in_addr_t get_interface_address(const char *interface) {
+  int fd;
+  struct ifreq ifr;
+
+  fd = socket(AF_INET, SOCK_DGRAM, 0);
+  ifr.ifr_addr.sa_family = AF_INET;
+
+  if(interface != NULL) {
+    strncpy(ifr.ifr_name, interface, strlen(interface));
+  } else {
+    strncpy(ifr.ifr_name, "eth0", IFNAMSIZ - 1);
+  }
+
+  ioctl(fd, SIOCGIFADDR, &ifr);
+  close(fd);
+  return ((struct sockaddr_in *) &ifr.ifr_addr)->sin_addr.s_addr;
+}
 
 char *strfind(const char *string, char character) {
   char *ptr;
@@ -69,7 +89,7 @@ void range_scan(const char *range, unsigned int *first, unsigned int *last) {
   }
 }
 
-void scan_port(const char *address, unsigned int port, unsigned char use_raw_socket, unsigned char verbose, struct scan_table **table) {
+void scan_port(const char *interface, const char *address, unsigned int port, unsigned char use_raw_socket, unsigned char verbose, struct scan_table **table) {
   char buffer[BUFFER_LENGTH];
   char pseudo_buffer[BUFFER_LENGTH];
   char banner[64];
@@ -82,6 +102,7 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
   struct tcphdr *tcp;
   struct pseudo_header *phdr;
   struct timeval tv;
+  socklen_t sockaddr_len;
   socklen_t sock_length = sizeof sock_error;
 
   addr.sin_family = AF_INET;
@@ -108,18 +129,18 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
     ip->version = 4;
     ip->tos = 0;
     ip->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr);
-    ip->id = htonl (54321); 
+    ip->id = htonl(rand()); 
     ip->frag_off = 0;
     ip->ttl = 255;
     ip->protocol = IPPROTO_TCP;
     ip->check = 0;
-    ip->saddr = inet_addr(INADDR_ANY);
+    ip->saddr = get_interface_address(interface);
     ip->daddr = addr.sin_addr.s_addr;
-       
+
     tcp = (struct tcphdr *)(buffer + sizeof(struct iphdr));
-    tcp->source = htons(1234);
+    tcp->source = htons(rand() % 65536);
     tcp->dest = htons(port);
-    tcp->seq = 0;
+    tcp->seq = rand();
     tcp->ack_seq = 0;
     tcp->doff = 5;
     tcp->fin = 0;
@@ -128,7 +149,7 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
     tcp->psh = 0;
     tcp->ack = 0;
     tcp->urg = 0;
-    tcp->window = htons(5840);
+    tcp->window = htons(29200);
     tcp->check = 0;
     tcp->urg_ptr = 0;
 
@@ -140,7 +161,8 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
     phdr->tcp_length = htons(sizeof(struct tcphdr));
 
     memcpy(pseudo_buffer + sizeof(struct pseudo_header), tcp, sizeof(struct tcphdr));
-    tcp->check = csum((unsigned short *) pseudo_buffer, sizeof(struct pseudo_header) + sizeof(struct tcphdr));
+    tcp->check = csum((unsigned short *) pseudo_buffer, (sizeof(struct pseudo_header) + sizeof(struct tcphdr)) >> 1);
+    ip->check = csum((unsigned short *) buffer, ip->tot_len >> 1);
 
     if(verbose != 0) {
       fprintf(stdout, "Scanning %s:%u (sending SYN packet)...\n", address, port);
@@ -156,15 +178,17 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
       fprintf(stdout, "Scanning %s:%u (waiting for answer)...\n", address, port);
     }
 
-    if(recv(sock, buffer, sizeof buffer, 0) < 0) {
+    if(recvfrom(sock, buffer, sizeof buffer, 0, (struct sockaddr *) &addr, &sockaddr_len) <= 0) {
+      perror("recv");
       close(sock);
       return;
     }
 
-    if(tcp->rst == 1 || (tcp->syn == 0 && tcp->ack == 0)) {
+    if(tcp->rst == 1 || tcp->syn == 0 || tcp->ack == 0) {
       close(sock);
       return;
     }
+
   } else {
     sock = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -244,9 +268,7 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
       strncpy(entry->banner, banner, sizeof entry->banner);
     }
 
-    if(*table == NULL) {
-      *table = entry;
-    }
+    *table = entry;
   }
 
   close(sock);
@@ -255,22 +277,25 @@ void scan_port(const char *address, unsigned int port, unsigned char use_raw_soc
 int main(int argc, char *argv[]) {
   struct scan_table *table, *entry;
   char range[32], address[32];
+  char *interface = NULL;
   int opt;
   unsigned int addr[3];
   unsigned int first_addr, last_addr, first_port, last_port, count, total, i, j;
   unsigned char use_raw_socket = 0, verbose = 0;
   time_t now;
 
+
   table = NULL;
   count = 0;
   time(&now);
+  srand(time(NULL));
 
   if(argc < 2) {
-    fprintf(stdout, "Uso: %s [-sv] <address range> [port range]\n", argv[0]);
+    fprintf(stdout, "Uso: %s [-sv] [-i interface] <address range> [port range]\n", argv[0]);
     return 0;
   }
 
-  while((opt = getopt(argc, argv, "sv")) != -1) {
+  while((opt = getopt(argc, argv, "svi:")) != -1) {
     switch(opt) {
       case 's':
         use_raw_socket = 1;
@@ -278,8 +303,11 @@ int main(int argc, char *argv[]) {
       case 'v':
         verbose = 1;
         break;
+      case 'i':
+        interface = strdup(optarg);
+        break;
       default:
-        fprintf(stdout, "Uso: %s [-sv] <address range> [port range]\n", argv[0]);
+        fprintf(stdout, "Uso: %s [-sv] [-i interface] <address range> [port range]\n", argv[0]);
         exit(0);
     }
   }
@@ -303,7 +331,7 @@ int main(int argc, char *argv[]) {
   for(i = first_addr; i <= last_addr; ++i) {
     for(j = first_port; j <= last_port; ++j) {
       snprintf(address, sizeof address, "%u.%u.%u.%u", addr[0], addr[1], addr[2], i);
-      scan_port(address, j, use_raw_socket, verbose, &table);
+      scan_port(interface, address, j, use_raw_socket, verbose, &table);
       ++count;
     }
   }
@@ -326,6 +354,10 @@ int main(int argc, char *argv[]) {
 
   if(verbose != 0) {
     fprintf(stdout, "%u ports scanned in total!\n", total);
+  }
+
+  if(interface != NULL) {
+    free(interface);
   }
 
   return 0;

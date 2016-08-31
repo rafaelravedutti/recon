@@ -19,7 +19,10 @@
 #define MAGIC_STRING      "HEAD / HTTP/1.1\n\n"
 
 /* Connect timeout (seconds) */
-#define CONNECT_TIMEOUT   2
+#define CONNECT_TIMEOUT   800
+
+/* Recv timeout (seconds) */
+#define RECV_TIMEOUT      2
 
 /* Scan table */
 struct scan_table {
@@ -101,9 +104,12 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
   struct iphdr *ip;
   struct tcphdr *tcp;
   struct pseudo_header *phdr;
-  struct timeval tv;
+  struct timeval connect_timeout, recv_timeout;
   socklen_t sockaddr_len;
   socklen_t sock_length = sizeof sock_error;
+
+  recv_timeout.tv_sec = RECV_TIMEOUT;
+  recv_timeout.tv_usec = 0;
 
   addr.sin_family = AF_INET;
   addr.sin_port = htons(port);
@@ -120,6 +126,12 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
 
     if(setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &one, sizeof(int)) < 0) {
       perror("setsockopt");
+      close(sock);
+      return;
+    }
+
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof recv_timeout) == -1) {
+      perror("setsockopt (recv timeout)");
       close(sock);
       return;
     }
@@ -210,8 +222,8 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
 
     FD_ZERO(&fdset);
     FD_SET(sock, &fdset);
-    tv.tv_sec = CONNECT_TIMEOUT;
-    tv.tv_usec = 0;
+    connect_timeout.tv_sec = 0;
+    connect_timeout.tv_usec = CONNECT_TIMEOUT;
 
     connect(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr_in));
 
@@ -219,7 +231,7 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
       fprintf(stdout, "Scanning %s:%u (connecting)...\n", address, port);
     }
 
-    if(select(sock + 1, NULL, &fdset, NULL, &tv) > 0) {
+    if(select(sock + 1, NULL, &fdset, NULL, &connect_timeout) > 0) {
       getsockopt(sock, SOL_SOCKET, SO_ERROR, &sock_error, &sock_length);
 
       if(sock_error != 0) {
@@ -239,6 +251,12 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
 
     if(verbose != 0) {
       fprintf(stdout, "Scanning %s:%u (retrieving banner)...\n", address, port);
+    }
+
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof recv_timeout) == -1) {
+      perror("setsockopt (recv timeout)");
+      close(sock);
+      return;
     }
 
     if(write(sock, MAGIC_STRING, strlen(MAGIC_STRING)) > 0) {

@@ -1,0 +1,36 @@
+Starting Nmap 7.01 ( https://nmap.org ) at 2016-08-31 09:13 BRT
+Nmap scan report for 200.238.144.27
+Host is up (0.017s latency).
+Not shown: 996 closed ports
+PORT      STATE SERVICE
+21/tcp    open  ftp
+22/tcp    open  ssh
+111/tcp   open  rpcbind
+32768/tcp open  filenet-tms
+
+Nmap scan report for 200.238.144.28
+Host is up (0.010s latency).
+Not shown: 997 closed ports
+PORT     STATE SERVICE
+22/tcp   open  ssh
+5001/tcp open  commplex-link
+8080/tcp open  http-proxy
+
+Nmap scan report for 200.238.144.29
+Host is up (0.011s latency).
+Not shown: 989 closed ports
+PORT     STATE SERVICE
+21/tcp   open  ftp
+22/tcp   open  ssh
+42/tcp   open  nameserver
+80/tcp   open  http
+135/tcp  open  msrpc
+443/tcp  open  https
+445/tcp  open  microsoft-ds
+1433/tcp open  ms-sql-s
+3306/tcp open  mysql
+5060/tcp open  sip
+5061/tcp open  sip-tls
+
+Nmap done: 10 IP addresses (3 hosts up) scanned in 2.28 seconds
+

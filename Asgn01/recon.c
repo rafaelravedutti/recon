@@ -18,8 +18,11 @@
 /* Request string */
 #define MAGIC_STRING      "HEAD / HTTP/1.1\n\n"
 
-/* Connect timeout (seconds) */
-#define CONNECT_TIMEOUT   2
+/* Connect timeout (miliseconds) */
+#define CONNECT_TIMEOUT   800
+
+/* Recv timeout (seconds) */
+#define RECV_TIMEOUT      2
 
 /* Scan table */
 struct scan_table {
@@ -116,9 +119,13 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
   struct iphdr *ip;
   struct tcphdr *tcp;
   struct pseudo_header *phdr;
-  struct timeval tv;
+  struct timeval connect_timeout, recv_timeout;
   socklen_t sockaddr_len;
   socklen_t sock_length = sizeof sock_error;
+
+  /* Receive timeout */
+  recv_timeout.tv_sec = RECV_TIMEOUT;
+  recv_timeout.tv_usec = 0;
 
   /* Address structure */
   addr.sin_family = AF_INET;
@@ -143,6 +150,13 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
        be sent including the TCP/IP headers */
     if(setsockopt(sock, IPPROTO_IP, IP_HDRINCL, &one, sizeof(int)) < 0) {
       perror("setsockopt");
+      close(sock);
+      return;
+    }
+
+    /* Sets socket receive timeout */
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof recv_timeout) == -1) {
+      perror("setsockopt (recv timeout)");
       close(sock);
       return;
     }
@@ -251,8 +265,8 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
     /* Creates a file descriptor set containing only the socket */
     FD_ZERO(&fdset);
     FD_SET(sock, &fdset);
-    tv.tv_sec = CONNECT_TIMEOUT;
-    tv.tv_usec = 0;
+    connect_timeout.tv_sec = 0;
+    connect_timeout.tv_usec = CONNECT_TIMEOUT;
 
     /* Performs the non-blocking connection */
     connect(sock, (struct sockaddr *) &addr, sizeof(struct sockaddr_in));
@@ -264,7 +278,7 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
     /* Uses select on the file descriptor set (the socket), when
        it's writable (connection worked) or the timeout occurred,
        perform the necessary procedures */
-    if(select(sock + 1, NULL, &fdset, NULL, &tv) > 0) {
+    if(select(sock + 1, NULL, &fdset, NULL, &connect_timeout) > 0) {
       getsockopt(sock, SOL_SOCKET, SO_ERROR, &sock_error, &sock_length);
 
       if(sock_error != 0) {
@@ -285,6 +299,13 @@ void scan_port(const char *interface, const char *address, unsigned int port, un
 
     if(verbose != 0) {
       fprintf(stdout, "Scanning %s:%u (retrieving banner)...\n", address, port);
+    }
+
+    /* Sets socket receive timeout */
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof recv_timeout) == -1) {
+      perror("setsockopt (recv timeout)");
+      close(sock);
+      return;
     }
 
     /* Writes the magic string on the socket, and then reads

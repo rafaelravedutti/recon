@@ -1,8 +1,8 @@
 CC=gcc
-CFLAGS=
+CFLAGS=-Wall
 
 recon: recon.c
-	${CC} -o $@ $< ${CFLAGS}
+	${CC} -o $@ $^ ${CFLAGS}
 
 clean: recon
 	rm -f recon

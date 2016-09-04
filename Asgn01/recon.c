@@ -69,7 +69,6 @@ in_addr_t get_interface_address(const char *interface) {
 char *strfind(const char *string, char character) {
   char *ptr;
 
-  /* Percorre a string e retorna o caractere se encontrá-lo */
   for(ptr = (char *) string; *ptr != '\0'; ptr++) {
     if(*ptr == character) {
       return ptr;
